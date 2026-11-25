@@ -9,11 +9,15 @@
 - `maint_facts/events.py` — 事件模型与修订协议（同号重送 / 异内容拒绝 / 高修订替换）
 - `maint_facts/engine.py` — 事实引擎：扫描线归属、增量修订、提案/发布、备查账
 - `maint_facts/availability.py` — 产线可用性账：分段状态、时长与复算依据（只读查询）
+- `maint_facts/recall.py` — 批号召回账：收货/调拨/领用流水的分仓余量与批号领用明细
 - `demo_handcalc.py` — 7 个手算例（含逐条断言与净变化展示）
 - `demo_availability.py` — 可用性手算例（三态裁定/共享依赖/合并/环/只读/访问边界）
+- `demo_recall.py` — 召回账手算例（FIFO/批号保留/同刻序/纳入规则/缺货拒绝/重归批/增量隔离）
 - `property_test.py` — 400 轮随机修订，增量结果始终等价于朴素全量重算
 - `availability_property_test.py` — 300 轮随机用例，边界扫描等价于逐时刻朴素裁定
+- `recall_property_test.py` — 300 轮随机召回账更正，增量等价全量重算 + 守恒 + 访问边界
 - `scale_test.py` — 增量隔离与规模测试（访问量不随全局历史增长）
+- `recall_scale_test.py` — 召回账增量隔离：单次更正只重读受影响仓群，批号查询不重放历史
 
 ## 事件类型
 
@@ -84,6 +88,40 @@
 查询按边界点扫描、按窗二分检索，只访问窗内实际可达的设备/服务/记录
 （`report.accessed` 可审计），不遍历全厂历史，也不逐时间单位推进。
 
+## 批号召回账（recall）
+
+班组收到供应商召回通知后，凭**料号 + 批号**盘点：该批货当前还剩在哪些仓
+（非零分仓余量）、已经发给了哪些设备（领用事件 ID、资产、出自该批的数量）。
+本账只看实物出入库，**实物出库不取决于工单归属**。
+
+三类流水共用稳定 ID 空间，按整数业务时刻记账、同刻按 ID 字典序：
+
+| 流水 | 来源 | 关键字段 |
+|------|------|----------|
+| 收货 `receipt` | `FlowRecord.receipt` | 仓 wh、料号 sku、批号 lot、数量 |
+| 仓间调拨 `transfer` | `FlowRecord.transfer` | 起仓 src、到仓 dst、料号 sku、数量 |
+| 检修领用 `spare` | 已发布 `spare` 事件，payload 补 `wh`/`sku` | 出库仓、料号、数量、资产 |
+
+- **spare 纳入规则**：wh/sku 两项都有才出库；两项都无的旧领用不纳入、不报错；
+  只缺一项则整批拒绝（`ValueError`）。非 spare 事件不产生流水；spare 被修订成
+  非 spare 事件或无 wh/sku 记录时，旧出库撤销。
+- **库存规则**：从空账起算，数量均为正整数。仓内同料号先到先出（FIFO），
+  “先到”以本次到仓为准；调拨保留实际扣出的**原收货批号**，同一笔调拨里的货
+  按扣出先后到仓。途经仓不留账，批号余量不会被重复计入。
+- **缺货语义**：任一流水库存不足（调拨起仓 / 领用出库仓余量不够）即抛
+  `InsufficientStock`，指出缺货流水、仓、料号与需/存量，**整批拒绝**，
+  已发布版本不变，查询仍见上一版。
+- **修订与发布**：`FlowRecord` 与 spare `Event` 沿用检修事件的修订协议
+  （同号重送 NOOP / 异内容冲突 / 低修订拒绝 / 高修订整份替换，允许跨类型），
+  每个 ID 每批至多一条。`submit` 暂存 `RecallProposal`，`publish()` 升版，
+  `publish(fail=True)` / `rollback()` 回滚。修订按业务时刻生效，早期流水
+  变动后后续领用按更正后的货流重新归批。
+- **增量边界**：日常更正只重读被改流水的**新旧料号及仓群**——对每个涉及料号，
+  以更正前后的调拨往来合计求仓群（以仓为点、调拨为无向边的连通分量），
+  只重放被改流水新旧端点所在仓群；其他料号/仓群不读取、不变更
+  （`proposal.accessed_ids` 可审计）。`query(sku, lot)` 直接读已物化的该批
+  嵌套账，不重放物流历史。
+
 ## 运行
 
 ```bash
@@ -92,4 +130,7 @@ python3 property_test.py   # 随机化等价性 + 工时守恒
 python3 scale_test.py      # 增量隔离与规模
 python3 demo_availability.py          # 可用性手算例（三态/共享依赖/合并/环/只读/访问边界）
 python3 availability_property_test.py # 可用性随机化等价性 + 访问边界
+python3 demo_recall.py                # 召回账手算例（FIFO/批号/缺货/重归批/增量隔离）
+python3 recall_property_test.py       # 召回账随机化等价性 + 守恒 + 访问边界
+python3 recall_scale_test.py          # 召回账增量隔离与规模
 ```

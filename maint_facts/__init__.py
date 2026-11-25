@@ -6,6 +6,7 @@
 - events       : 带稳定 ID 与递增修订号的事件存储及修订协议
 - engine       : 按工单 × 实际位置物化的事实引擎、增量修订、版本发布
 - availability : 产线可用性账（只读分段状态查询，不改动检修账）
+- recall       : 批号召回账（收货/调拨/领用流水的分仓余量与批号领用明细）
 """
 
 from .intervals import Interval
@@ -51,6 +52,18 @@ from .availability import (
     ServiceVerdict,
     recompute_from_basis,
 )
+from .recall import (
+    RECEIPT,
+    TRANSFER,
+    FlowRecord,
+    FlowStore,
+    InsufficientStock,
+    LotBalance,
+    RecallLedger,
+    RecallProposal,
+    RecallReport,
+    UsageLine,
+)
 
 __all__ = [
     "Interval",
@@ -90,4 +103,14 @@ __all__ = [
     "SegmentBasis",
     "ServiceVerdict",
     "recompute_from_basis",
+    "RECEIPT",
+    "TRANSFER",
+    "FlowRecord",
+    "FlowStore",
+    "InsufficientStock",
+    "LotBalance",
+    "RecallLedger",
+    "RecallProposal",
+    "RecallReport",
+    "UsageLine",
 ]
